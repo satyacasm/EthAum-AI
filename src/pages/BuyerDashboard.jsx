@@ -3,13 +3,13 @@ import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabaseClient";
 import Navbar from "../components/NavBar";
 import ChatWindow from "../components/ChatWindow";
+import { generateEmbedding } from "../lib/openai"; // AI LIVE
 import { 
   BarChart3, Search, Clock, CheckCircle2, XCircle, 
   TrendingUp, MessageCircle, Zap, Sparkles, Loader2 
 } from "lucide-react";
 import gsap from "gsap";
 import { useNavigate } from "react-router-dom";
-import { generateEmbedding } from "../lib/openai"; // Import the embedding generator
 
 export default function BuyerDashboard() {
   const { user } = useAuth();
@@ -22,21 +22,22 @@ export default function BuyerDashboard() {
   const [isSearching, setIsSearching] = useState(false);
   const [activeChatRequest, setActiveChatRequest] = useState(null);
   
-  const containerRef = useRef(null);
-
   useEffect(() => {
     if (user) fetchBuyerData();
   }, [user]);
 
   const fetchBuyerData = async () => {
     try {
+      // 1. Fetch Watchlist
       const { data: watchData } = await supabase.from('startup_upvotes').select(`startup_id, startups ( * )`).eq('user_id', user.id);
       const upvoted = watchData?.map(item => item.startups).filter(Boolean) || [];
 
+      // 2. Fetch Requests
       const { data: reqData } = await supabase.from('pilot_requests').select(`*, startups ( * )`).eq('buyer_id', user.id);
       const allRequests = reqData || [];
       setRequests(allRequests);
 
+      // Combine for initial view
       const approvedStartups = allRequests.filter(r => r.status === 'approved' && r.startups).map(r => r.startups);
       const combined = [...upvoted, ...approvedStartups];
       const uniqueWatchlist = Array.from(new Map(combined.map(item => [item.id, item])).values());
@@ -49,7 +50,7 @@ export default function BuyerDashboard() {
     }
   };
 
-  // NEW: Semantic Search Logic (Updated with Debugging)
+  // --- AI LOGIC: SEMANTIC SEARCH ---
   const handleSemanticSearch = async (e) => {
     e.preventDefault();
     if (!searchTerm) { fetchBuyerData(); return; }
@@ -57,42 +58,35 @@ export default function BuyerDashboard() {
     setIsSearching(true);
     
     try {
-        console.log("Generating vector for:", searchTerm);
+        console.log("Vectorizing query:", searchTerm);
         // 1. Convert Search Query to Vector
         const vector = await generateEmbedding(searchTerm);
         
         if (!vector) throw new Error("Failed to vectorize query");
-        console.log("Vector generated successfully. Length:", vector.length);
 
-        // 2. Call the Database RPC function
-        // CRITICAL UPDATE: Lowered match_threshold to 0.01 to ensure results appear during testing
+        // 2. Call Database RPC (Vector Match)
         const { data: results, error } = await supabase.rpc('match_startups', {
             query_embedding: vector,
-            match_threshold: 0.2, // Lowered for testing!
+            match_threshold: 0.1, // Adjusted for broader matching
             match_count: 10
         });
 
-        if (error) {
-            console.error("Supabase RPC Error:", error);
-            throw error;
-        }
-
-        console.log("Search Results:", results);
+        if (error) throw error;
 
         // 3. Update UI
         if (activeTab === 'watchlist') {
             setWatchlist(results || []);
         } else {
-            // For pilots, filter existing requests that match the found startup IDs
+            // Filter existing requests by semantic match IDs
             const resultIds = results.map(r => r.id);
             setRequests(prev => prev.filter(req => resultIds.includes(req.startup_id)));
         }
 
     } catch (err) {
         console.error("Search Logic Error:", err);
-        // Fallback to basic text search if AI fails
+        // Fallback to basic text search
         const term = searchTerm.toLowerCase();
-        setWatchlist(prev => prev.filter(s => s.name.toLowerCase().includes(term)));
+        setWatchlist(prev => prev.filter(s => s.name.toLowerCase().includes(term) || s.tagline.toLowerCase().includes(term)));
     } finally {
         setIsSearching(false);
     }

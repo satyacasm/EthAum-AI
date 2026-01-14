@@ -13,40 +13,35 @@ import Loader from "./components/Loader";
 import ProtectedRoute from "./components/ProtectedRoute";
 import StartupDetails from "./pages/StartupDetails";
 import BuyerDashboard from "./pages/BuyerDashboard";
-
-// --- PAGE IMPORTS ---
 import AuthPage from "./pages/AuthPage";
 import UpdatePasswordPage from "./pages/UpdatePasswordPage";
 import FounderDashboard from "./pages/FounderDashboard";
+import MarketConsole from "./pages/MarketConsole";
+import LaunchIntelligence from "./pages/LaunchIntelligence";
+import DealRoom from "./pages/DealRoom"; // NEW IMPORT
 
-// --- LOCAL COMPONENTS ---
 function LandingPage() {
   return (
     <main className="w-full relative overflow-hidden">
       <Navbar />
       <Hero />
-      <TrendingLaunches />
-      <MarketIntelligence />
-      <EnterpriseDeals />
+      <TrendingLaunches isPublic={true} />
+      <MarketIntelligence isPublic={true} />
+      <EnterpriseDeals isPublic={true} />
       <Footer />
     </main>
   );
 }
 
-// --- LOADER MANAGER ---
 function AppContent() {
   const location = useLocation();
   const [showIntro, setShowIntro] = useState(false);
 
   useEffect(() => {
     const hasSeenIntro = sessionStorage.getItem("hasSeenIntro");
-    
-    // 1. SHOW ONLY IF: On Home Page AND Has Not Seen Intro
     if (location.pathname === "/" && !hasSeenIntro) {
       setShowIntro(true);
-    } 
-    // 2. CRITICAL FIX: FORCE HIDE on any other page (Founders/Auth/Startups)
-    else {
+    } else {
       setShowIntro(false);
     }
   }, [location.pathname]);
@@ -58,31 +53,32 @@ function AppContent() {
 
   return (
     <>
-      {/* Only render Loader if state is true */}
       {showIntro && <Loader onComplete={handleIntroComplete} />}
-
       <AmbientBackground />
-      
       <div className={`w-full overflow-x-hidden relative ${showIntro ? 'h-screen overflow-hidden' : ''}`}>
         <SmoothScrollWrapper>
           <Routes>
-            {/* 1. Public Routes */}
+            {/* PUBLIC */}
             <Route path="/" element={<LandingPage />} />
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/auth/update-password" element={<UpdatePasswordPage />} />
             <Route path="/startup/:id" element={<StartupDetails />} />
             
-            {/* 2. Protected Founder Route */}
+            {/* PRIVATE DASHBOARDS */}
             <Route element={<ProtectedRoute allowedRole="founder" />}>
               <Route path="/founder/dashboard" element={<FounderDashboard />} />
             </Route>
-
-            {/* 3. Protected Buyer Route */}
             <Route element={<ProtectedRoute allowedRole="buyer" />}>
               <Route path="/buyer/dashboard" element={<BuyerDashboard />} />
             </Route>
 
-            {/* 4. Catch-All */}
+            {/* CONSOLES (Accessible to Logged In) */}
+            <Route element={<ProtectedRoute />}>
+               <Route path="/market" element={<MarketConsole />} />
+               <Route path="/launches" element={<LaunchIntelligence />} />
+               <Route path="/deals" element={<DealRoom />} /> {/* NEW ROUTE */}
+            </Route>
+
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </SmoothScrollWrapper>
@@ -91,7 +87,6 @@ function AppContent() {
   );
 }
 
-// --- MAIN APP EXPORT ---
 export default function App() {
   return (
     <AuthProvider>

@@ -1,23 +1,29 @@
 -- ==============================================================================
--- ETHAUM.AI DATABASE SCHEMA & CONFIGURATION
--- VERSION: 2.0 (Secure Vault + AI Vector Search Enabled)
+-- ETHAUM.AI - ENTERPRISE MARKETPLACE SCHEMA
+-- VERSION: 3.0 (Production Release)
 -- 
+-- DESCRIPTION:
+-- Full database setup for Ethaum.ai including AI Vector Search, 
+-- Launch Leaderboards, Deal Room Logic, and Secure Vault Storage.
+--
 -- INSTRUCTIONS:
 -- 1. Create a new Supabase Project.
--- 2. Go to SQL Editor -> Paste this script -> Run.
+-- 2. Enable the "Vector" extension in Dashboard if not running this script.
+-- 3. Run this script in the Supabase SQL Editor.
 -- ==============================================================================
 
 -- ------------------------------------------------------------------------------
--- 1. EXTENSIONS & SETUP
+-- 1. EXTENSIONS & CONFIGURATION
 -- ------------------------------------------------------------------------------
--- Enable Vector extension for AI Semantic Search
+-- Enable Vector extension for OpenAI embeddings (1536 dimensions)
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- ------------------------------------------------------------------------------
--- 2. TABLE DEFINITIONS
+-- 2. PUBLIC TABLES
 -- ------------------------------------------------------------------------------
 
--- PROFILES (Linked to auth.users)
+-- 2.1 PROFILES
+-- Extends the default Supabase auth.users table
 CREATE TABLE public.profiles (
   id uuid NOT NULL PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email text,
@@ -27,36 +33,73 @@ CREATE TABLE public.profiles (
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- STARTUPS (Includes Vector Embedding)
+-- 2.2 VERIFIED BUYERS
+-- Whitelist for Enterprise Buyers (e.g., Microsoft, BMW)
+CREATE TABLE public.verified_buyers (
+  domain text NOT NULL PRIMARY KEY,
+  company_name text NOT NULL,
+  weight_score integer DEFAULT 5, -- Used for weighted voting logic
+  logo_url text,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now())
+);
+
+-- 2.3 STARTUPS
+-- The core entity. Includes "Deal Room" fields and AI Embeddings.
 CREATE TABLE public.startups (
   id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   founder_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  
+  -- Public Profile
   name text NOT NULL,
   tagline text,
   description text,
   website_url text,
   logo_url text,
-  stage text CHECK (stage IN ('Series A', 'Series B', 'Series C', 'Series D')),
-  arr_range text CHECK (arr_range IN ('$1M-$5M', '$5M-$20M', '$20M-$50M', '$50M+')),
+  stage text CHECK (stage IN ('Seed', 'Series A', 'Series B', 'Series C', 'Series D')),
+  arr_range text,
+  
+  -- Deal Room Configuration
   deal_offer text,
-  deal_expiry date,
+  pilot_price_deal integer, -- Discounted price for platform
+  pilot_price_retail integer, -- Original price (for comparison)
+  slots_total integer DEFAULT 5,
+  slots_taken integer DEFAULT 0,
+  
+  -- Launch Assets (Secure Paths)
   vault_ready boolean DEFAULT false,
-  -- Secure Assets (Stores Paths, not Public URLs)
   pitch_deck_url text,
   technical_docs_url text,
   financials_url text,
   compliance_url text,
+  
+  -- System Flags
   is_onboarded boolean DEFAULT false,
-  -- Metrics
   upvotes_count integer DEFAULT 0,
-  eth_aum_score integer DEFAULT 0,
+  eth_aum_score integer DEFAULT 0, -- AI calculated innovation score
+  
+  -- AI Vector (OpenAI text-embedding-3-small)
+  description_embedding vector(1536),
+  
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL,
-  updated_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL,
-  -- AI Vector Column (1536 dimensions for OpenAI text-embedding-3-small)
-  description_embedding vector(1536)
+  updated_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- PILOT REQUESTS
+-- 2.4 LAUNCHES (Launch Intelligence)
+-- Tracks historical performance and "Product of the Day" status
+CREATE TABLE public.launches (
+  id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  startup_id uuid NOT NULL REFERENCES public.startups(id) ON DELETE CASCADE,
+  launch_date date NOT NULL DEFAULT CURRENT_DATE,
+  day_rank integer, -- Snapshot of rank for that day
+  status text DEFAULT 'draft' CHECK (status IN ('draft', 'scheduled', 'live', 'completed')),
+  featured_asset_url text,
+  maker_comment text,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()),
+  updated_at timestamp with time zone DEFAULT timezone('utc'::text, now())
+);
+
+-- 2.5 PILOT REQUESTS (Deal Flow)
+-- Connects Buyers to Startups
 CREATE TABLE public.pilot_requests (
   id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   startup_id uuid NOT NULL REFERENCES public.startups(id) ON DELETE CASCADE,
@@ -66,7 +109,7 @@ CREATE TABLE public.pilot_requests (
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- PILOT MESSAGES (Chat)
+-- 2.6 PILOT MESSAGES (Chat)
 CREATE TABLE public.pilot_messages (
   id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   request_id uuid NOT NULL REFERENCES public.pilot_requests(id) ON DELETE CASCADE,
@@ -75,7 +118,7 @@ CREATE TABLE public.pilot_messages (
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now())
 );
 
--- UPVOTES
+-- 2.7 UPVOTES
 CREATE TABLE public.startup_upvotes (
   id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   startup_id uuid REFERENCES public.startups(id) ON DELETE CASCADE,
@@ -83,7 +126,7 @@ CREATE TABLE public.startup_upvotes (
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now())
 );
 
--- REVIEWS
+-- 2.8 REVIEWS
 CREATE TABLE public.reviews (
   id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   startup_id uuid NOT NULL REFERENCES public.startups(id) ON DELETE CASCADE,
@@ -95,126 +138,148 @@ CREATE TABLE public.reviews (
 );
 
 -- ------------------------------------------------------------------------------
--- 3. STORAGE SETUP (SECURE VAULT)
+-- 3. VIEWS (ADVANCED LOGIC)
 -- ------------------------------------------------------------------------------
--- Create PRIVATE bucket (Public = False)
-INSERT INTO storage.buckets (id, name, public)
-VALUES ('vault-assets', 'vault-assets', false)
-ON CONFLICT (id) DO UPDATE SET public = false;
 
--- ------------------------------------------------------------------------------
--- 4. ROW LEVEL SECURITY (RLS)
--- ------------------------------------------------------------------------------
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.startups ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.pilot_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.pilot_messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.startup_upvotes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
-
--- Profiles Policies
-CREATE POLICY "Public_Read_Profiles" ON public.profiles FOR SELECT USING (true);
-CREATE POLICY "Self_Update_Profiles" ON public.profiles FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "Self_Insert_Profiles" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
-
--- Startups Policies
-CREATE POLICY "Public_Read_Startups" ON public.startups FOR SELECT USING (true);
-CREATE POLICY "Founder_Manage_Startup" ON public.startups FOR ALL USING (auth.uid() = founder_id);
-CREATE POLICY "Founder_Insert_Startup" ON public.startups FOR INSERT WITH CHECK (auth.uid() = founder_id);
-
--- Requests Policies
-CREATE POLICY "Buyer_Create_Req" ON public.pilot_requests FOR INSERT WITH CHECK (auth.uid() = buyer_id);
-CREATE POLICY "View_Relevant_Req" ON public.pilot_requests FOR SELECT USING (
-    auth.uid() = buyer_id OR 
-    EXISTS (SELECT 1 FROM public.startups WHERE id = startup_id AND founder_id = auth.uid())
-);
-CREATE POLICY "Founder_Update_Req" ON public.pilot_requests FOR UPDATE USING (
-    EXISTS (SELECT 1 FROM public.startups WHERE id = startup_id AND founder_id = auth.uid())
-);
-
--- Messages Policies
-CREATE POLICY "User_Send_Msg" ON public.pilot_messages FOR INSERT WITH CHECK (auth.uid() = sender_id);
-CREATE POLICY "User_View_Msg" ON public.pilot_messages FOR SELECT USING (
-    auth.uid() = sender_id OR 
-    EXISTS (
-        SELECT 1 FROM public.pilot_requests pr 
-        WHERE pr.id = request_id 
-        AND (
-            pr.buyer_id = auth.uid() OR 
-            EXISTS (SELECT 1 FROM public.startups s WHERE s.id = pr.startup_id AND s.founder_id = auth.uid())
-        )
-    )
-);
-
--- Upvotes/Reviews Policies
-CREATE POLICY "Public_Read_Votes" ON public.startup_upvotes FOR SELECT USING (true);
-CREATE POLICY "User_Vote" ON public.startup_upvotes FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Public_Read_Reviews" ON public.reviews FOR SELECT USING (true);
-CREATE POLICY "User_Review" ON public.reviews FOR INSERT WITH CHECK (auth.uid() = reviewer_id);
+-- 3.1 DAILY LEADERBOARD VIEW
+-- Automatically calculates rankings (1, 2, 3...) based on votes.
+-- Handles tie-breaking by creation date.
+CREATE OR REPLACE VIEW public.daily_leaderboard AS
+SELECT 
+    l.id AS launch_id,
+    l.startup_id,
+    l.launch_date,
+    s.name,
+    s.upvotes_count,
+    s.tagline,
+    s.stage,
+    s.arr_range,
+    s.logo_url,
+    ROW_NUMBER() OVER (
+        PARTITION BY l.launch_date 
+        ORDER BY s.upvotes_count DESC, l.created_at ASC
+    ) as calculated_rank
+FROM public.launches l
+JOIN public.startups s ON l.startup_id = s.id
+WHERE l.status = 'live';
 
 -- ------------------------------------------------------------------------------
--- 5. STORAGE POLICIES (VAULT SECURITY)
+-- 4. FUNCTIONS & TRIGGERS
 -- ------------------------------------------------------------------------------
--- A. Founders Manage Own Assets
-CREATE POLICY "Founder Manage Own Assets" ON storage.objects
-FOR ALL
-USING ( bucket_id = 'vault-assets' AND auth.uid()::text = (storage.foldername(name))[1] )
-WITH CHECK ( bucket_id = 'vault-assets' AND auth.uid()::text = (storage.foldername(name))[1] );
 
--- B. Founders Read Own Assets
-CREATE POLICY "Founder Read Own Assets" ON storage.objects
-FOR SELECT
-USING ( bucket_id = 'vault-assets' AND auth.uid()::text = (storage.foldername(name))[1] );
+-- 4.1 AUTOMATIC VOTE COUNTER
+-- Updates the startups table whenever a vote is cast
+CREATE OR REPLACE FUNCTION increment_vote_count()
+RETURNS TRIGGER 
+SECURITY DEFINER
+AS $$
+BEGIN
+  UPDATE public.startups
+  SET upvotes_count = COALESCE(upvotes_count, 0) + 1
+  WHERE id = NEW.startup_id;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
--- C. Buyers Read Approved Assets Only
-CREATE POLICY "Buyer Read Approved Assets" ON storage.objects
-FOR SELECT
-USING (
-    bucket_id = 'vault-assets'
-    AND EXISTS (
-        SELECT 1 FROM public.pilot_requests pr
-        JOIN public.startups s ON pr.startup_id = s.id
-        WHERE 
-            pr.buyer_id = auth.uid()
-            AND pr.status = 'approved'
-            AND s.founder_id::text = (storage.foldername(name))[1]
-    )
-);
+CREATE TRIGGER on_vote_added
+AFTER INSERT ON public.startup_upvotes
+FOR EACH ROW
+EXECUTE FUNCTION increment_vote_count();
 
--- ------------------------------------------------------------------------------
--- 6. AI SEMANTIC SEARCH FUNCTION
--- ------------------------------------------------------------------------------
+-- 4.2 AI SEMANTIC MATCHING
+-- Performs vector similarity search
 CREATE OR REPLACE FUNCTION match_startups (
   query_embedding vector(1536),
   match_threshold float,
   match_count int
 )
-RETURNS setof startups
+RETURNS TABLE (
+  id uuid,
+  name text,
+  tagline text,
+  stage text,
+  similarity float
+)
 LANGUAGE plpgsql
 AS $$
 BEGIN
   RETURN QUERY
-  SELECT *
-  FROM startups
-  WHERE 1 - (description_embedding <=> query_embedding) > match_threshold
-  ORDER BY description_embedding <=> query_embedding
+  SELECT 
+    s.id,
+    s.name,
+    s.tagline,
+    s.stage,
+    (1 - (s.description_embedding <=> query_embedding)) as similarity
+  FROM public.startups s
+  WHERE 1 - (s.description_embedding <=> query_embedding) > match_threshold
+  ORDER BY s.description_embedding <=> query_embedding
   LIMIT match_count;
 END;
 $$;
 
 -- ------------------------------------------------------------------------------
--- 7. REALTIME & PERMISSIONS
+-- 5. STORAGE BUCKETS
 -- ------------------------------------------------------------------------------
-DO $$
-BEGIN
-    ALTER PUBLICATION supabase_realtime ADD TABLE pilot_messages;
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
-END $$;
+-- Note: You might need to run this part in the Supabase Dashboard "Storage" section if SQL fails
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('vault-assets', 'vault-assets', false)
+ON CONFLICT (id) DO NOTHING;
 
-GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
-GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION match_startups(vector, double precision, integer) TO authenticated;
-GRANT EXECUTE ON FUNCTION match_startups(vector, double precision, integer) TO anon;
+-- ------------------------------------------------------------------------------
+-- 6. ROW LEVEL SECURITY (RLS) POLICIES
+-- ------------------------------------------------------------------------------
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.startups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.launches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pilot_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pilot_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.startup_upvotes ENABLE ROW LEVEL SECURITY;
 
--- END OF SCRIPT
+-- Profiles
+CREATE POLICY "Public Read Profiles" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "Self Update Profiles" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "Self Insert Profiles" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
+
+-- Startups
+CREATE POLICY "Public Read Startups" ON public.startups FOR SELECT USING (true);
+CREATE POLICY "Founder Manage Startup" ON public.startups FOR ALL USING (auth.uid() = founder_id);
+
+-- Launches
+CREATE POLICY "Public Read Launches" ON public.launches FOR SELECT USING (true);
+CREATE POLICY "Founder Manage Launches" ON public.launches FOR ALL USING (
+  EXISTS (SELECT 1 FROM public.startups WHERE id = startup_id AND founder_id = auth.uid())
+);
+
+-- Requests
+CREATE POLICY "Buyer Create Request" ON public.pilot_requests FOR INSERT WITH CHECK (auth.uid() = buyer_id);
+CREATE POLICY "View Own Requests" ON public.pilot_requests FOR SELECT USING (
+  auth.uid() = buyer_id OR 
+  EXISTS (SELECT 1 FROM public.startups WHERE id = startup_id AND founder_id = auth.uid())
+);
+CREATE POLICY "Founder Update Request" ON public.pilot_requests FOR UPDATE USING (
+  EXISTS (SELECT 1 FROM public.startups WHERE id = startup_id AND founder_id = auth.uid())
+);
+
+-- Upvotes
+CREATE POLICY "Public Read Votes" ON public.startup_upvotes FOR SELECT USING (true);
+CREATE POLICY "User Vote" ON public.startup_upvotes FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- Storage (Vault)
+CREATE POLICY "Founder Manage Own Assets" ON storage.objects
+FOR ALL USING ( bucket_id = 'vault-assets' AND auth.uid()::text = (storage.foldername(name))[1] );
+
+CREATE POLICY "Buyer Read Approved Assets" ON storage.objects
+FOR SELECT USING (
+    bucket_id = 'vault-assets'
+    AND EXISTS (
+        SELECT 1 FROM public.pilot_requests pr
+        JOIN public.startups s ON pr.startup_id = s.id
+        WHERE pr.buyer_id = auth.uid()
+        AND pr.status = 'approved'
+        AND s.founder_id::text = (storage.foldername(name))[1]
+    )
+);
+
+-- ------------------------------------------------------------------------------
+-- END OF SCHEMA
+-- ------------------------------------------------------------------------------

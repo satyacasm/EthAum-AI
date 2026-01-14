@@ -7,8 +7,6 @@ export default function FounderOnboarding({
   return (
     <div className="max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div className="bg-[#0A0A0A] border border-white/10 rounded-[1.5rem] overflow-hidden shadow-2xl relative">
-        
-        {/* Header Strip */}
         <div className="bg-[#0f0f0f] border-b border-white/5 p-6 flex justify-between items-center">
             <h2 className="text-lg font-light tracking-tight flex items-center gap-3">
                 <div className="p-1.5 bg-ethaum-green rounded text-black"><Zap size={14}/></div>
@@ -18,7 +16,6 @@ export default function FounderOnboarding({
         </div>
 
         <div className="p-8 space-y-6">
-            {/* Top Row: Name & Website */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div className="space-y-1.5 group">
                     <label className="text-[9px] text-gray-500 font-bold uppercase tracking-widest group-focus-within:text-ethaum-green transition-colors">Venture Name</label>
@@ -40,37 +37,21 @@ export default function FounderOnboarding({
                 </div>
             </div>
 
-            {/* Middle Row: Stage & ARR */}
             <div className="grid grid-cols-2 gap-5">
                 <div className="space-y-1.5">
                     <label className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Stage</label>
-                    <div className="relative">
-                        <select 
-                            className="w-full bg-[#050505] border border-white/10 p-3 text-xs font-bold text-white focus:border-ethaum-green outline-none appearance-none rounded-lg cursor-pointer"
-                            value={formData.stage} 
-                            onChange={e => setFormData({...formData, stage: e.target.value})}
-                        >
-                            {["Series A", "Series B", "Series C", "Series D"].map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500 text-[10px]">▼</div>
-                    </div>
+                    <select className="w-full bg-[#050505] border border-white/10 p-3 text-xs font-bold text-white focus:border-ethaum-green outline-none rounded-lg cursor-pointer" value={formData.stage} onChange={e => setFormData({...formData, stage: e.target.value})}>
+                        {["Series A", "Series B", "Series C", "Series D"].map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
                 </div>
                 <div className="space-y-1.5">
-                    <label className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">ARR Range</label>
-                    <div className="relative">
-                        <select 
-                            className="w-full bg-[#050505] border border-white/10 p-3 text-xs font-bold text-white focus:border-ethaum-green outline-none appearance-none rounded-lg cursor-pointer"
-                            value={formData.arr_range} 
-                            onChange={e => setFormData({...formData, arr_range: e.target.value})}
-                        >
-                            {["$1M-$5M", "$5M-$20M", "$20M-$50M", "$50M+"].map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500 text-[10px]">▼</div>
-                    </div>
+                    <label className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Capital Raised</label>
+                    <select className="w-full bg-[#050505] border border-white/10 p-3 text-xs font-bold text-white focus:border-ethaum-green outline-none rounded-lg cursor-pointer" value={formData.arr_range} onChange={e => setFormData({...formData, arr_range: e.target.value})}>
+                        {["$1M-$5M", "$5M-$20M", "$20M-$50M", "$50M+"].map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
                 </div>
             </div>
 
-            {/* AI Section */}
             <div className="relative pt-2">
                 <label className="flex justify-between items-end mb-2">
                     <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest">Core Intelligence Description</span>

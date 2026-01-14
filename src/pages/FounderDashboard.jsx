@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { supabase } from "../lib/supabaseClient";
-import { generateLaunchAssets, generateEmbedding } from "../lib/openai"; 
+import { generateLaunchAssets, generateEmbedding } from "../lib/openai"; // AI LIVE
 import { Loader2 } from "lucide-react"; 
 
 // Components
@@ -25,24 +25,27 @@ export default function FounderDashboard() {
   const [activeTab, setActiveTab] = useState("listed"); 
   const [activeChatRequest, setActiveChatRequest] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  
-  // Signed URLs State (Vault Security)
   const [signedUrls, setSignedUrls] = useState({});
 
-  // Form & AI State
+  // Form State - UPDATED WITH DEAL PARAMS
   const [formData, setFormData] = useState({
-    name: "", website_url: "", tagline: "", description: "", stage: "Series A", arr_range: "$1M-$5M", deal_offer: ""
+    name: "", website_url: "", tagline: "", description: "", 
+    stage: "Series A", arr_range: "$1M-$5M", deal_offer: "",
+    pilot_price_deal: 0, 
+    slots_total: 5       
   });
   const [files, setFiles] = useState({
     pitch_deck_url: null, technical_docs_url: null, financials_url: null, compliance_url: null
   });
+  
+  // AI & Upload State
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState(null);
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => { if (user) fetchInitialData(); }, [user]);
 
-  // Generate Signed URLs for the Founder View
+  // Generate Signed URLs for Vault Access
   useEffect(() => {
     if (!startup) return;
     const generateFounderLinks = async () => {
@@ -54,7 +57,7 @@ export default function FounderDashboard() {
                 const { data } = await supabase.storage.from('vault-assets').createSignedUrl(path, 3600);
                 if (data?.signedUrl) urls[key] = data.signedUrl;
             } else if (path) {
-                urls[key] = path; // Legacy support
+                urls[key] = path; 
             }
         }
         setSignedUrls(urls);
@@ -70,10 +73,12 @@ export default function FounderDashboard() {
         setFormData({
             name: data.name || "", website_url: data.website_url || "", tagline: data.tagline || "",
             description: data.description || "", stage: data.stage || "Series A",
-            arr_range: data.arr_range || "$1M-$5M", deal_offer: data.deal_offer || ""
+            arr_range: data.arr_range || "$1M-$5M", deal_offer: data.deal_offer || "",
+            pilot_price_deal: data.pilot_price_deal || 0, // Load Price
+            slots_total: data.slots_total || 5            // Load Slots
         });
         
-        // Logic to determine which step to show
+        // Determine Logic Step
         if (!data.is_onboarded) setStep(0);
         else if (!data.vault_ready) setStep(1);
         else { 
@@ -81,7 +86,6 @@ export default function FounderDashboard() {
             fetchRequests(data.id); 
         }
       } else {
-          // If no data found, ensure we are at Step 0
           setStep(0);
       }
     } catch (err) { console.error(err); } finally { setLoading(false); }
@@ -92,17 +96,25 @@ export default function FounderDashboard() {
     setRequests(data || []);
   };
 
+  // --- AI LOGIC: GENERATE ASSETS ---
   const handleAiFill = async () => {
     if (!formData.description || formData.description.length < 5) {
-        alert("Please provide at least a rough description or URL for the Neural Net.");
+        alert("Please provide a basic description or URL first.");
         return;
     }
-    setAiLoading(true); setAiError(null);
+    setAiLoading(true); 
+    setAiError(null);
     try {
       const assets = await generateLaunchAssets(formData.description, formData.website_url);
-      setFormData(prev => ({ ...prev, tagline: assets.tagline || prev.tagline, deal_offer: assets.offer || prev.deal_offer, description: assets.elaborated_description || prev.description }));
+      setFormData(prev => ({ 
+          ...prev, 
+          tagline: assets.tagline || prev.tagline, 
+          deal_offer: assets.offer || prev.deal_offer, 
+          description: assets.elaborated_description || prev.description 
+      }));
     } catch (error) {
-      console.error(error); setAiError("Neural Uplink Failed. Check API Quota.");
+      console.error(error); 
+      setAiError("Neural Uplink Failed. Check API Quota.");
     } finally { setAiLoading(false); }
   };
 
@@ -113,17 +125,22 @@ export default function FounderDashboard() {
     return path;
   };
 
+  // --- UPDATE STARTUP (Including Deal Params) ---
   const handleUpdateStartup = async () => {
     setUploading(true);
     try {
       const updates = { ...formData };
       
       if (formData.description) {
-         const embedding = await generateEmbedding(formData.description);
-         if (embedding) updates.description_embedding = embedding;
+         try {
+             const embedding = await generateEmbedding(formData.description);
+             if (embedding) updates.description_embedding = embedding;
+         } catch (e) { console.error("Vector generation failed", e); }
       }
 
-      for (const key in files) if (files[key]) updates[key] = await uploadToStorage(files[key], key);
+      for (const key in files) {
+          if (files[key]) updates[key] = await uploadToStorage(files[key], key);
+      }
       
       await supabase.from('startups').update(updates).eq('id', startup.id);
       await fetchInitialData();
@@ -163,13 +180,9 @@ export default function FounderDashboard() {
             handleAiFill={handleAiFill} aiLoading={aiLoading} aiError={aiError}
             onSave={async () => {
                if (!formData.name || !formData.description) return alert("Terminal requires Name and Description.");
-               
                let embedding = null;
-               try {
-                  embedding = await generateEmbedding(formData.description);
-               } catch (e) { console.error("Embedding failed", e); }
+               try { embedding = await generateEmbedding(formData.description); } catch (e) {}
 
-               // --- FIX: Check for errors here ---
                const { data, error } = await supabase.from('startups').upsert({
                  founder_id: user.id, 
                  ...formData, 
@@ -177,14 +190,9 @@ export default function FounderDashboard() {
                  is_onboarded: true
                }).select().single();
 
-               if (error) {
-                 console.error("Onboarding Error:", error);
-                 alert("Initialization Failed: " + error.message);
-                 return; // Do NOT advance step if error
-               }
-
+               if (error) { alert("Initialization Failed: " + error.message); return; }
                setStartup(data); 
-               setStep(1); // Only advance if successful
+               setStep(1); 
             }}
           />
         )}
@@ -196,32 +204,14 @@ export default function FounderDashboard() {
                setUploading(true);
                try {
                  const updates = { vault_ready: true };
-                 
-                 // Upload Files
                  for (const key in files) {
-                    if (files[key]) {
-                        try {
-                            updates[key] = await uploadToStorage(files[key], key);
-                        } catch(e) {
-                            console.error("Upload failed for", key, e);
-                            alert(`Failed to upload ${key}`);
-                            return; 
-                        }
-                    }
+                    if (files[key]) updates[key] = await uploadToStorage(files[key], key);
                  }
-
-                 // Update Database
                  const { error } = await supabase.from('startups').update(updates).eq('founder_id', user.id);
-                 
                  if (error) throw error;
-
                  fetchInitialData();
-               } catch (err) {
-                 console.error(err);
-                 alert("Launch Failed: " + err.message);
-               } finally {
-                 setUploading(false);
-               }
+               } catch (err) { alert("Launch Failed: " + err.message); } 
+               finally { setUploading(false); }
             }}
           />
         )}
